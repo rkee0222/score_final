@@ -8,18 +8,21 @@ import { SyncPanel, useAutoSync } from './sync-ui';
 
 type Screen = 'library' | 'editor' | 'viewer' | 'sync';
 
-function useBlobUrl(blob?: Blob): string {
+// Wrap the stored ArrayBuffer in a fresh Blob at render time. Building the Blob
+// on demand (rather than storing it) sidesteps the iOS Safari IndexedDB Blob bug.
+function usePageUrl(data?: ArrayBuffer, mime = 'image/jpeg'): string {
   const [url, setUrl] = useState('');
   useEffect(() => {
-    if (!blob) { setUrl(''); return; }
-    const next = URL.createObjectURL(blob); setUrl(next);
+    if (!data || data.byteLength === 0) { setUrl(''); return; }
+    const next = URL.createObjectURL(new Blob([data], { type: mime }));
+    setUrl(next);
     return () => URL.revokeObjectURL(next);
-  }, [blob]);
+  }, [data, mime]);
   return url;
 }
 
-function PageImage({ page, className = '' }: { page: Pick<ScorePage, 'blob' | 'rotation'> | Pick<PageDraft, 'blob' | 'rotation'>; className?: string }) {
-  const url = useBlobUrl(page.blob);
+function PageImage({ page, className = '' }: { page: Pick<ScorePage, 'data' | 'mime' | 'rotation'> | Pick<PageDraft, 'data' | 'mime' | 'rotation'>; className?: string }) {
+  const url = usePageUrl(page.data, page.mime);
   const sideways = page.rotation === 90 || page.rotation === 270;
   return url ? <img className={`${className} ${sideways ? 'sideways' : ''}`} src={url} alt="악보 페이지" draggable={false} style={{ transform: `rotate(${page.rotation}deg)` }} /> : <span className="image-loading">불러오는 중…</span>;
 }
@@ -88,7 +91,7 @@ function Editor({ initialBook, initialPages, onCancel, onSaved, onAddFiles }: {
       lastOpenedAt: initialBook?.lastOpenedAt ?? now, currentPage: Math.min(initialBook?.currentPage ?? 0, pages.length - 1),
       pageCount: pages.length, coverPageId: pages[0].id, viewMode: initialBook?.viewMode ?? 'page',
     };
-    const stored: ScorePage[] = pages.map((page, order) => ({ ...page, bookId: id, order, mime: page.blob.type || 'image/jpeg', updatedAt: now }));
+    const stored: ScorePage[] = pages.map((page, order) => ({ ...page, bookId: id, order, mime: page.mime || 'image/jpeg', updatedAt: now }));
     await saveBookWithPages(book, stored); onSaved();
   };
   return <main className="editor-page">
@@ -182,7 +185,7 @@ export function App() {
     setBusy(true); try { const added = await importScoreFiles(files, setProgress); const next = [...current, ...added]; if (apply) apply(next); else { setDrafts(next); setActiveBook(undefined); setScreen('editor'); } } catch (error) { alert(error instanceof Error ? error.message : '파일을 가져오지 못했습니다.'); } finally { setBusy(false); setProgress(''); }
   };
   const open = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setActivePages(pages); setScreen('viewer'); };
-  const edit = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setDrafts(pages.map(({ id, name, blob, width, height, rotation }) => ({ id, name, blob, width, height, rotation }))); setScreen('editor'); };
+  const edit = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setDrafts(pages.map(({ id, name, mime, data, width, height, rotation }) => ({ id, name, mime, data, width, height, rotation }))); setScreen('editor'); };
   const remove = async (book: ScoreBook) => { if (!confirm(`“${book.title}” 악보를 삭제할까요? 다른 기기에도 동기화됩니다.`)) return; await deleteBook(book.id); await refresh(); sync.syncNow().catch(() => undefined); };
   const home = async () => { setScreen('library'); setActiveBook(undefined); setActivePages([]); await refresh(); sync.syncNow().catch(() => undefined); };
   return <div className="app-shell">

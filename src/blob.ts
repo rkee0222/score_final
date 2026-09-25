@@ -1,18 +1,16 @@
-export function blobUrl(blob: Blob): string { return URL.createObjectURL(blob); }
-
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+export function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   return btoa(binary);
 }
 
-export function base64ToBlob(value: string, mime = 'image/jpeg'): Blob {
+export function base64ToBuffer(value: string): ArrayBuffer {
   const binary = atob(value.replace(/\s/g, ''));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
+  return bytes.buffer;
 }
 
 export function jsonToBase64(value: unknown): string {
