@@ -45,7 +45,7 @@ function Library({ books, busy, progress, onImport, onOpen, onEdit, onDelete }: 
   return <main className="library-page">
     <section className="library-intro">
       <div className="eyebrow">YOUR DIGITAL SCORE SHELF</div>
-      <h1>악보를 모으고,<br/><em>한 장씩 넘겨보세요.</em></h1>
+      <h1>피아노 악보 뷰어</h1>
       <p>사진이나 PDF를 한 곡으로 묶어 저장합니다. 연주 중 화면의 좌우를 터치하거나 스와이프해 넘기세요.</p>
       <label className={`import-button ${busy ? 'disabled' : ''}`}>
         <input type="file" accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf" multiple disabled={busy} onChange={(event) => {
