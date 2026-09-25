@@ -13,11 +13,12 @@ async function pdfLibrary() {
   return pdfjs;
 }
 
-async function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => canvas.toBlob(
-    (blob) => blob ? resolve(blob) : reject(new Error('이미지를 압축하지 못했습니다.')),
+async function canvasData(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+    (result) => result ? resolve(result) : reject(new Error('이미지를 압축하지 못했습니다.')),
     'image/jpeg', JPEG_QUALITY,
   ));
+  return blob.arrayBuffer();
 }
 
 async function decodeImage(file: Blob): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
@@ -44,7 +45,7 @@ async function normalizeImage(file: File): Promise<PageDraft> {
     if (!context) throw new Error('이미지를 처리할 수 없습니다.');
     context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
     context.drawImage(decoded.source, 0, 0, width, height);
-    return { id: makeId('page'), name: file.name, blob: await canvasBlob(canvas), width, height, rotation: 0 };
+    return { id: makeId('page'), name: file.name, mime: 'image/jpeg', data: await canvasData(canvas), width, height, rotation: 0 };
   } finally { decoded.close(); }
 }
 
@@ -67,8 +68,8 @@ async function pagesFromPdf(file: File, progress: (message: string) => void): Pr
     context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: context, viewport }).promise;
     pages.push({
-      id: makeId('page'), name: `${stem}-${String(number).padStart(3, '0')}.jpg`,
-      blob: await canvasBlob(canvas), width: canvas.width, height: canvas.height, rotation: 0,
+      id: makeId('page'), name: `${stem}-${String(number).padStart(3, '0')}.jpg`, mime: 'image/jpeg',
+      data: await canvasData(canvas), width: canvas.width, height: canvas.height, rotation: 0,
     });
     page.cleanup();
     await new Promise((resolve) => setTimeout(resolve, 0));

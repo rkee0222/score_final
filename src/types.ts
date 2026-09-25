@@ -19,7 +19,9 @@ export interface ScorePage {
   order: number;
   name: string;
   mime: string;
-  blob: Blob;
+  // Stored as ArrayBuffer, not Blob: iOS Safari corrupts Blobs kept in IndexedDB
+  // across reloads (WebKitBlobResource error), which showed synced pages as "?".
+  data: ArrayBuffer;
   width: number;
   height: number;
   rotation: 0 | 90 | 180 | 270;
@@ -29,7 +31,8 @@ export interface ScorePage {
 export interface PageDraft {
   id: string;
   name: string;
-  blob: Blob;
+  mime: string;
+  data: ArrayBuffer;
   width: number;
   height: number;
   rotation: 0 | 90 | 180 | 270;

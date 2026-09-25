@@ -8,18 +8,21 @@ import { SyncPanel, useAutoSync } from './sync-ui';
 
 type Screen = 'library' | 'editor' | 'viewer' | 'sync';
 
-function useBlobUrl(blob?: Blob): string {
+// Wrap the stored ArrayBuffer in a fresh Blob at render time. Building the Blob
+// on demand (rather than storing it) sidesteps the iOS Safari IndexedDB Blob bug.
+function usePageUrl(data?: ArrayBuffer, mime = 'image/jpeg'): string {
   const [url, setUrl] = useState('');
   useEffect(() => {
-    if (!blob) { setUrl(''); return; }
-    const next = URL.createObjectURL(blob); setUrl(next);
+    if (!data || data.byteLength === 0) { setUrl(''); return; }
+    const next = URL.createObjectURL(new Blob([data], { type: mime }));
+    setUrl(next);
     return () => URL.revokeObjectURL(next);
-  }, [blob]);
+  }, [data, mime]);
   return url;
 }
 
-function PageImage({ page, className = '' }: { page: Pick<ScorePage, 'blob' | 'rotation'> | Pick<PageDraft, 'blob' | 'rotation'>; className?: string }) {
-  const url = useBlobUrl(page.blob);
+function PageImage({ page, className = '' }: { page: Pick<ScorePage, 'data' | 'mime' | 'rotation'> | Pick<PageDraft, 'data' | 'mime' | 'rotation'>; className?: string }) {
+  const url = usePageUrl(page.data, page.mime);
   const sideways = page.rotation === 90 || page.rotation === 270;
   return url ? <img className={`${className} ${sideways ? 'sideways' : ''}`} src={url} alt="악보 페이지" draggable={false} style={{ transform: `rotate(${page.rotation}deg)` }} /> : <span className="image-loading">불러오는 중…</span>;
 }
@@ -77,6 +80,7 @@ function Editor({ initialBook, initialPages, onCancel, onSaved, onAddFiles }: {
     if (to < 0 || to >= pages.length || from === to) return;
     const next = [...pages]; const [item] = next.splice(from, 1); next.splice(to, 0, item); setPages(next);
   };
+  const [preview, setPreview] = useState<number | null>(null);
   const rotate = (index: number) => setPages((current) => current.map((page, i) => i === index ? { ...page, rotation: ((page.rotation + 90) % 360) as PageDraft['rotation'] } : page));
   const save = async () => {
     if (!title.trim()) return alert('곡 제목을 입력해 주세요.');
@@ -88,7 +92,7 @@ function Editor({ initialBook, initialPages, onCancel, onSaved, onAddFiles }: {
       lastOpenedAt: initialBook?.lastOpenedAt ?? now, currentPage: Math.min(initialBook?.currentPage ?? 0, pages.length - 1),
       pageCount: pages.length, coverPageId: pages[0].id, viewMode: initialBook?.viewMode ?? 'page',
     };
-    const stored: ScorePage[] = pages.map((page, order) => ({ ...page, bookId: id, order, mime: page.blob.type || 'image/jpeg', updatedAt: now }));
+    const stored: ScorePage[] = pages.map((page, order) => ({ ...page, bookId: id, order, mime: page.mime || 'image/jpeg', updatedAt: now }));
     await saveBookWithPages(book, stored); onSaved();
   };
   return <main className="editor-page">
@@ -97,13 +101,35 @@ function Editor({ initialBook, initialPages, onCancel, onSaved, onAddFiles }: {
     <div className="organizer-toolbar"><strong>{pages.length}페이지</strong><label className="outline add-pages"><input type="file" accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); event.currentTarget.value = ''; if (files.length) onAddFiles(files, pages, setPages); }}/>＋ 페이지 추가</label></div>
     <div className="page-grid">
       {pages.map((page, index) => <article className={`page-card ${dragIndex === index ? 'dragging' : ''}`} key={page.id} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null); }} onDragEnd={() => setDragIndex(null)}>
-        <div className="page-preview"><PageImage page={page}/><span className="page-badge">{index + 1}</span></div>
+        <button type="button" className="page-preview" aria-label={`${index + 1}페이지 크게 보기`} onClick={() => setPreview(index)}><PageImage page={page}/><span className="page-badge">{index + 1}</span><span className="zoom-hint">⤢</span></button>
         <div className="page-tools"><button aria-label="앞으로 이동" disabled={index === 0} onClick={() => move(index, index - 1)}>←</button><button aria-label="회전" onClick={() => rotate(index)}>↻</button><button aria-label="뒤로 이동" disabled={index === pages.length - 1} onClick={() => move(index, index + 1)}>→</button><button className="danger" aria-label="페이지 삭제" onClick={() => setPages((current) => current.filter((_, i) => i !== index))}>×</button></div>
         <small>{page.name}</small>
       </article>)}
     </div>
     <div className="editor-bottom"><button className="primary" onClick={save}>이 순서로 저장</button></div>
+    {preview !== null && pages[preview] && <PagePreviewOverlay pages={pages} index={preview} onIndex={setPreview} onClose={() => setPreview(null)}/>}
   </main>;
+}
+
+function PagePreviewOverlay({ pages, index, onIndex, onClose }: { pages: PageDraft[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft' && index > 0) onIndex(index - 1);
+      if (event.key === 'ArrowRight' && index < pages.length - 1) onIndex(index + 1);
+    };
+    addEventListener('keydown', handler);
+    return () => removeEventListener('keydown', handler);
+  }, [index, pages.length, onIndex, onClose]);
+  return <div className="preview-overlay" onClick={onClose}>
+    <div className="preview-top"><span>{index + 1} / {pages.length}</span><button aria-label="닫기" onClick={onClose}>✕</button></div>
+    <div className="preview-body" onClick={(event) => event.stopPropagation()}>
+      <button className="preview-nav" aria-label="이전 페이지" disabled={index === 0} onClick={() => onIndex(index - 1)}>‹</button>
+      <div className="preview-figure"><PageImage page={pages[index]}/></div>
+      <button className="preview-nav" aria-label="다음 페이지" disabled={index === pages.length - 1} onClick={() => onIndex(index + 1)}>›</button>
+    </div>
+    <div className="preview-caption">{pages[index].name} · 화면을 누르면 닫힙니다</div>
+  </div>;
 }
 
 function Viewer({ book: initialBook, pages, onBack, onEdit }: { book: ScoreBook; pages: ScorePage[]; onBack: () => void; onEdit: () => void }) {
@@ -182,7 +208,7 @@ export function App() {
     setBusy(true); try { const added = await importScoreFiles(files, setProgress); const next = [...current, ...added]; if (apply) apply(next); else { setDrafts(next); setActiveBook(undefined); setScreen('editor'); } } catch (error) { alert(error instanceof Error ? error.message : '파일을 가져오지 못했습니다.'); } finally { setBusy(false); setProgress(''); }
   };
   const open = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setActivePages(pages); setScreen('viewer'); };
-  const edit = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setDrafts(pages.map(({ id, name, blob, width, height, rotation }) => ({ id, name, blob, width, height, rotation }))); setScreen('editor'); };
+  const edit = async (book: ScoreBook) => { const pages = await getPages(book.id); setActiveBook(book); setDrafts(pages.map(({ id, name, mime, data, width, height, rotation }) => ({ id, name, mime, data, width, height, rotation }))); setScreen('editor'); };
   const remove = async (book: ScoreBook) => { if (!confirm(`“${book.title}” 악보를 삭제할까요? 다른 기기에도 동기화됩니다.`)) return; await deleteBook(book.id); await refresh(); sync.syncNow().catch(() => undefined); };
   const home = async () => { setScreen('library'); setActiveBook(undefined); setActivePages([]); await refresh(); sync.syncNow().catch(() => undefined); };
   return <div className="app-shell">

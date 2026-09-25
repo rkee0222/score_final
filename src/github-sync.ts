@@ -1,4 +1,4 @@
-import { base64ToJson, blobToBase64, jsonToBase64 } from './blob';
+import { base64ToBuffer, base64ToJson, bufferToBase64, jsonToBase64 } from './blob';
 import {
   clearDeletion, getDeletions, getPages, listBooks, saveBookWithPages,
   saveSyncConfig, deleteBook,
@@ -71,12 +71,15 @@ async function ensureManifest(config: SyncConfig): Promise<CloudManifest> {
   return manifest;
 }
 
-async function downloadBlob(config: SyncConfig, path: string): Promise<Blob> {
-  const response = await fetch(endpoint(config, `/contents/${path}?ref=main`), {
-    headers: { Accept: 'application/vnd.github.raw', Authorization: `Bearer ${config.token}`, 'X-GitHub-Api-Version': API_VERSION },
-  });
-  if (!response.ok) throw new Error(`악보 페이지를 내려받지 못했습니다 (${response.status}).`);
-  return response.blob();
+async function downloadPageData(config: SyncConfig, path: string): Promise<ArrayBuffer> {
+  // Resolve the blob SHA via contents metadata, then read it through the Git
+  // Blobs API (base64) and decode to an ArrayBuffer. Storing ArrayBuffers (not
+  // Blobs) avoids the iOS Safari IndexedDB Blob-corruption bug.
+  const meta = await api<{ sha: string }>(config, `/contents/${encodeURI(path)}?ref=main`);
+  if (!meta?.sha) throw new Error('악보 페이지 정보를 찾지 못했습니다.');
+  const blob = await api<{ content: string; encoding: string }>(config, `/git/blobs/${meta.sha}`);
+  if (!blob?.content || blob.encoding !== 'base64') throw new Error('악보 페이지를 내려받지 못했습니다.');
+  return base64ToBuffer(blob.content);
 }
 
 async function loadCloudBook(config: SyncConfig, index: CloudBookIndex): Promise<CloudBook> {
@@ -94,7 +97,7 @@ async function downloadBook(config: SyncConfig, index: CloudBookIndex, progress:
     progress(`“${book.title}” 내려받는 중 · ${i + 1}/${cloudPages.length}`);
     pages.push({
       id: page.id, bookId: book.id, order: page.order, name: page.name, mime: page.mime,
-      blob: await downloadBlob(config, page.path), width: page.width, height: page.height,
+      data: await downloadPageData(config, page.path), width: page.width, height: page.height,
       rotation: page.rotation, updatedAt: book.contentUpdatedAt,
     });
   }
@@ -139,7 +142,7 @@ async function cloudPageEntries(
     const page = pages[i];
     const path = `books/${book.id}/pages/${String(i + 1).padStart(4, '0')}-${page.id}.jpg`;
     newPaths.add(path);
-    const sha = await createBlob(config, await blobToBase64(page.blob));
+    const sha = await createBlob(config, bufferToBase64(page.data));
     entries.push({ path, mode: '100644', type: 'blob', sha });
     cloudPages.push({ id: page.id, name: page.name, path, mime: page.mime, width: page.width, height: page.height, rotation: page.rotation, order: i });
   }
