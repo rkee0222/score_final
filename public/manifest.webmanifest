@@ -1,0 +1,16 @@
+{
+  "name": "ScoreView 수동 악보 뷰어",
+  "short_name": "ScoreView",
+  "description": "PDF와 사진 악보를 한 곡으로 저장하고 터치로 넘기는 오프라인 뷰어",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eee9de",
+  "theme_color": "#191711",
+  "lang": "ko",
+  "icons": [
+    { "src": "./icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
