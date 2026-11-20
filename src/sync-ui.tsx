@@ -40,11 +40,18 @@ export function useAutoSync(onSynced: () => void): SyncController {
   }, []);
 
   const connect = useCallback(async (next: SyncConfig) => {
-    setStatus({ phase: 'connecting', message: '비공개 저장소 확인 중…', lastSyncAt: null });
+    setStatus({ phase: 'connecting', message: '새 연결 정보 확인 중…', lastSyncAt: next.lastSyncAt });
     try {
-      await verifyConnection(next); await saveSyncConfig(next); rememberConfig(next); await syncNow(next);
+      // Verify and persist the newly entered token first. If an automatic sync
+      // with the expired token is still finishing, wait for it instead of
+      // silently skipping the first sync with the replacement token.
+      await verifyConnection(next);
+      await saveSyncConfig(next);
+      rememberConfig(next);
+      while (running.current) await new Promise((resolve) => setTimeout(resolve, 150));
+      await syncNow(next);
     } catch (error) {
-      setStatus({ phase: 'error', message: error instanceof Error ? error.message : '연결하지 못했습니다.', lastSyncAt: null });
+      setStatus({ phase: 'error', message: error instanceof Error ? error.message : '연결하지 못했습니다.', lastSyncAt: next.lastSyncAt });
       throw error;
     }
   }, [syncNow]);
@@ -88,14 +95,15 @@ export function SyncPanel({ controller, onBack }: { controller: SyncController; 
   const [showToken, setShowToken] = useState(false);
   useEffect(() => { if (controller.config) { setOwner(controller.config.owner); setRepo(controller.config.repo); setToken(controller.config.token); } }, [controller.config]);
   const busy = controller.status.phase === 'syncing' || controller.status.phase === 'connecting';
-  const connect = async () => {
-    // iOS copy/paste often injects spaces, newlines, or zero-width characters
-    // into the token, which GitHub then rejects as a 401. Strip all whitespace
-    // (including invisible separators) rather than only trimming the ends.
+  const saveAndSync = async () => {
     const cleanToken = token.replace(/[\s\u200b-\u200d\uFEFF]/g, '');
     if (!owner.trim() || !repo.trim() || !cleanToken) return alert('GitHub 사용자명, 저장소 이름과 토큰을 모두 입력해 주세요.');
-    try { await controller.connect({ id: 'github', owner: owner.trim(), repo: repo.trim(), token: cleanToken, enabled: true, lastSyncAt: controller.config?.lastSyncAt ?? null }); }
-    catch { /* status already contains the user-facing error */ }
+    try {
+      // Always pass the values currently visible in the fields. Previously the
+      // primary "지금 동기화" button ignored a replacement token and reused
+      // controller.config, which could still contain the expired token.
+      await controller.connect({ id: 'github', owner: owner.trim(), repo: repo.trim(), token: cleanToken, enabled: true, lastSyncAt: controller.config?.lastSyncAt ?? null });
+    } catch { /* status already contains the user-facing error */ }
   };
   return <main className="sync-page">
     <button className="back-link" onClick={onBack}>← 보관함</button>
@@ -109,7 +117,8 @@ export function SyncPanel({ controller, onBack }: { controller: SyncController; 
         <label><span>Fine-grained access token</span><div className="token-field"><input type={showToken ? 'text' : 'password'} value={token} onChange={(event) => setToken(event.target.value.replace(/[\s\u200b-\u200d\uFEFF]/g, ''))} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} inputMode="text" placeholder="github_pat_…"/><button onClick={() => setShowToken((value) => !value)}>{showToken ? '숨김' : '보기'}</button></div></label>
       </div>
       <div className="sync-actions">
-        {!controller.config ? <button className="primary" disabled={busy} onClick={connect}>{busy ? '연결 중…' : '연결하고 첫 동기화'}</button> : <><button className="primary" disabled={busy || !navigator.onLine} onClick={() => controller.syncNow().catch(() => undefined)}>{busy ? '동기화 중…' : '지금 동기화'}</button><button className="outline" onClick={connect}>연결 정보 갱신</button><button className="text-danger" onClick={async () => { if (confirm('이 기기의 GitHub 연결만 해제할까요? 저장된 악보는 유지됩니다.')) await controller.disconnect(); }}>이 기기 연결 해제</button></>}
+        <button className="primary" disabled={busy || !navigator.onLine} onClick={saveAndSync}>{busy ? '확인·동기화 중…' : controller.config ? '입력한 정보로 다시 연결·동기화' : '연결하고 첫 동기화'}</button>
+        {controller.config && <button className="text-danger" onClick={async () => { if (confirm('이 기기의 GitHub 연결만 해제할까요? 저장된 악보는 유지됩니다.')) await controller.disconnect(); }}>이 기기 연결 해제</button>}
       </div>
       <details className="token-guide"><summary>토큰은 어떻게 만드나요?</summary><ol><li>GitHub의 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">Fine-grained token 만들기</a>를 엽니다.</li><li>Repository access에서 <b>Only select repositories</b> → <b>score_final_data</b>만 선택합니다.</li><li>Repository permissions에서 <b>Contents: Read and write</b>만 지정하고 생성합니다.</li><li>생성 직후 보이는 토큰을 복사해 위 칸에 붙여 넣습니다.</li></ol></details>
       <p className="security-note">🔒 토큰은 이 기기의 IndexedDB에만 저장되며 앱 코드나 공개 저장소로 전송되지 않습니다. Safari 사이트 데이터를 지우거나 토큰을 만료·취소하면 다시 연결해야 합니다.</p>
