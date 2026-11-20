@@ -89,8 +89,12 @@ export function SyncPanel({ controller, onBack }: { controller: SyncController; 
   useEffect(() => { if (controller.config) { setOwner(controller.config.owner); setRepo(controller.config.repo); setToken(controller.config.token); } }, [controller.config]);
   const busy = controller.status.phase === 'syncing' || controller.status.phase === 'connecting';
   const connect = async () => {
-    if (!owner.trim() || !repo.trim() || !token.trim()) return alert('GitHub 사용자명, 저장소 이름과 토큰을 모두 입력해 주세요.');
-    try { await controller.connect({ id: 'github', owner: owner.trim(), repo: repo.trim(), token: token.trim(), enabled: true, lastSyncAt: controller.config?.lastSyncAt ?? null }); }
+    // iOS copy/paste often injects spaces, newlines, or zero-width characters
+    // into the token, which GitHub then rejects as a 401. Strip all whitespace
+    // (including invisible separators) rather than only trimming the ends.
+    const cleanToken = token.replace(/[\s\u200b-\u200d\uFEFF]/g, '');
+    if (!owner.trim() || !repo.trim() || !cleanToken) return alert('GitHub 사용자명, 저장소 이름과 토큰을 모두 입력해 주세요.');
+    try { await controller.connect({ id: 'github', owner: owner.trim(), repo: repo.trim(), token: cleanToken, enabled: true, lastSyncAt: controller.config?.lastSyncAt ?? null }); }
     catch { /* status already contains the user-facing error */ }
   };
   return <main className="sync-page">
@@ -102,7 +106,7 @@ export function SyncPanel({ controller, onBack }: { controller: SyncController; 
       <div className="sync-form">
         <label><span>GitHub 사용자명</span><input value={owner} onChange={(event) => setOwner(event.target.value)} autoCapitalize="none" spellCheck={false}/></label>
         <label><span>비공개 데이터 저장소</span><input value={repo} onChange={(event) => setRepo(event.target.value)} autoCapitalize="none" spellCheck={false}/></label>
-        <label><span>Fine-grained access token</span><div className="token-field"><input type={showToken ? 'text' : 'password'} value={token} onChange={(event) => setToken(event.target.value)} autoCapitalize="none" autoComplete="off" spellCheck={false} placeholder="github_pat_…"/><button onClick={() => setShowToken((value) => !value)}>{showToken ? '숨김' : '보기'}</button></div></label>
+        <label><span>Fine-grained access token</span><div className="token-field"><input type={showToken ? 'text' : 'password'} value={token} onChange={(event) => setToken(event.target.value.replace(/[\s\u200b-\u200d\uFEFF]/g, ''))} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} inputMode="text" placeholder="github_pat_…"/><button onClick={() => setShowToken((value) => !value)}>{showToken ? '숨김' : '보기'}</button></div></label>
       </div>
       <div className="sync-actions">
         {!controller.config ? <button className="primary" disabled={busy} onClick={connect}>{busy ? '연결 중…' : '연결하고 첫 동기화'}</button> : <><button className="primary" disabled={busy || !navigator.onLine} onClick={() => controller.syncNow().catch(() => undefined)}>{busy ? '동기화 중…' : '지금 동기화'}</button><button className="outline" onClick={connect}>연결 정보 갱신</button><button className="text-danger" onClick={async () => { if (confirm('이 기기의 GitHub 연결만 해제할까요? 저장된 악보는 유지됩니다.')) await controller.disconnect(); }}>이 기기 연결 해제</button></>}

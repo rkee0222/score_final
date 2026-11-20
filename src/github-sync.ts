@@ -18,31 +18,47 @@ function endpoint(config: SyncConfig, path: string): string {
   return `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}${path}`;
 }
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function api<T>(config: SyncConfig, path: string, init: RequestInit = {}, allow404 = false): Promise<T | null> {
-  const response = await fetch(endpoint(config, path), {
-    ...init,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${config.token}`,
-      'X-GitHub-Api-Version': API_VERSION,
-      'Content-Type': 'application/json',
-      ...init.headers,
-    },
-  });
-  if (allow404 && response.status === 404) return null;
-  if (!response.ok) {
-    let detail = '';
-    try { detail = (await response.json()).message ?? ''; } catch { detail = response.statusText; }
-    if (response.status === 401) throw new Error('토큰이 올바르지 않거나 만료되었습니다.');
-    if (response.status === 403) throw new Error('토큰에 저장소 읽기/쓰기 권한이 없습니다.');
-    if (response.status === 404) throw new Error('비공개 데이터 저장소를 찾을 수 없습니다. 토큰의 저장소 접근 범위를 확인하세요.');
-    throw new Error(`GitHub 동기화 오류 (${response.status}): ${detail}`);
+  // A freshly created or regenerated GitHub token can take a short while to
+  // propagate, during which the API returns a transient 401 "Bad credentials"
+  // even though the token is valid. Retry 401s a few times with backoff before
+  // giving up, as GitHub recommends for transient auth failures.
+  const maxAttempts = 4;
+  let lastDetail = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(endpoint(config, path), {
+      ...init,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${config.token}`,
+        'X-GitHub-Api-Version': API_VERSION,
+        'Content-Type': 'application/json',
+        ...init.headers,
+      },
+    });
+    if (allow404 && response.status === 404) return null;
+    if (response.ok) {
+      if (response.status === 204) return null;
+      return response.json() as Promise<T>;
+    }
+    try { lastDetail = (await response.json()).message ?? ''; } catch { lastDetail = response.statusText; }
+    if (response.status === 401 && attempt < maxAttempts) { await wait(attempt * 1500); continue; }
+    if (response.status === 401) throw new Error('토큰 인증에 실패했습니다. 방금 만든 토큰이라면 1~2분 뒤 다시 시도해 주세요. 계속 실패하면 토큰 상태(Active)와 score_final_data의 Contents 읽기/쓰기 권한을 확인하세요.');
+    if (response.status === 403) throw new Error('토큰에 저장소 읽기/쓰기 권한이 없습니다. score_final_data의 Contents를 Read and write로 설정했는지 확인하세요.');
+    if (response.status === 404) throw new Error('비공개 데이터 저장소를 찾을 수 없습니다. 토큰의 저장소 접근 범위(score_final_data)를 확인하세요.');
+    throw new Error(`GitHub 동기화 오류 (${response.status}): ${lastDetail}`);
   }
-  if (response.status === 204) return null;
-  return response.json() as Promise<T>;
+  throw new Error('GitHub 요청에 반복 실패했습니다. 잠시 후 다시 시도해 주세요.');
 }
 
 export async function verifyConnection(config: SyncConfig): Promise<{ fullName: string; private: boolean }> {
+  // Catch malformed tokens before hitting the API so the user gets a clear hint
+  // instead of a generic 401 (the common iPad copy/paste failure mode).
+  if (!/^github_pat_[A-Za-z0-9_]+$/.test(config.token)) {
+    throw new Error('토큰 형식이 올바르지 않습니다. 복사할 때 공백이나 글자가 빠졌을 수 있어요. github_pat_ 로 시작하는 값을 다시 복사해 붙여넣어 주세요.');
+  }
   const repo = await api<{ full_name: string; private: boolean; permissions?: { push?: boolean } }>(config, '');
   if (!repo) throw new Error('저장소를 확인하지 못했습니다.');
   if (!repo.private) throw new Error('악보 데이터 저장소는 반드시 Private 저장소여야 합니다.');
