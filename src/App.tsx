@@ -27,11 +27,34 @@ function PageImage({ page, className = '' }: { page: Pick<ScorePage, 'data' | 'm
   return url ? <img className={`${className} ${sideways ? 'sideways' : ''}`} src={url} alt="악보 페이지" draggable={false} style={{ transform: `rotate(${page.rotation}deg)` }} /> : <span className="image-loading">불러오는 중…</span>;
 }
 
-function Header({ screen, online, onHome, onSync }: { screen: Screen; online: boolean; onHome: () => void; onSync: () => void }) {
+// Home-screen PWAs have no address bar, so the user cannot pull-to-refresh.
+// This clears all caches, unregisters service workers, and hard-reloads so the
+// latest deployed app is fetched. Scores in IndexedDB are NOT touched.
+async function forceRefreshApp() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch { /* best effort; reload anyway */ }
+  // Cache-busting query so the HTML itself is refetched from the network.
+  const target = `${location.pathname}?u=${Date.now()}`;
+  location.replace(target);
+}
+
+function Header({ screen, online, refreshing, onHome, onSync, onRefresh }: { screen: Screen; online: boolean; refreshing: boolean; onHome: () => void; onSync: () => void; onRefresh: () => void }) {
   return <header className="app-header">
     <button className="brand" onClick={onHome}><span>♪</span><strong>ScoreView</strong><small>manual score reader</small></button>
     <div className="badges"><span className="badge saved">● 기기 내 저장</span><span className={`badge ${online ? 'online' : 'offline'}`}>{online ? '동기화 가능' : '오프라인'}</span></div>
-    <nav><button className={screen === 'library' ? 'active' : ''} onClick={onHome}>보관함</button><button className={screen === 'sync' ? 'active' : ''} onClick={onSync}>동기화</button></nav>
+    <nav>
+      <button className="refresh-button" aria-label="앱 새로고침" title="앱 새로고침" disabled={refreshing} onClick={onRefresh}>{refreshing ? '⟳' : '↻'} 새로고침</button>
+      <button className={screen === 'library' ? 'active' : ''} onClick={onHome}>보관함</button>
+      <button className={screen === 'sync' ? 'active' : ''} onClick={onSync}>동기화</button>
+    </nav>
   </header>;
 }
 
@@ -200,8 +223,14 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [online, setOnline] = useState(navigator.onLine);
+  const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(async () => setBooks(await listBooks()), []);
   const sync = useAutoSync(refresh);
+  const refreshApp = async () => {
+    if (!confirm('앱을 최신 버전으로 새로고침할까요?\n저장된 악보는 지워지지 않습니다.')) return;
+    setRefreshing(true);
+    await forceRefreshApp();
+  };
   useEffect(() => { refresh(); requestPersistentStorage(); }, [refresh]);
   useEffect(() => { const update = () => setOnline(navigator.onLine); addEventListener('online', update); addEventListener('offline', update); return () => { removeEventListener('online', update); removeEventListener('offline', update); }; }, []);
   const importFiles = async (files: File[], current: PageDraft[] = [], apply?: (pages: PageDraft[]) => void) => {
@@ -212,7 +241,7 @@ export function App() {
   const remove = async (book: ScoreBook) => { if (!confirm(`“${book.title}” 악보를 삭제할까요? 다른 기기에도 동기화됩니다.`)) return; await deleteBook(book.id); await refresh(); sync.syncNow().catch(() => undefined); };
   const home = async () => { setScreen('library'); setActiveBook(undefined); setActivePages([]); await refresh(); sync.syncNow().catch(() => undefined); };
   return <div className="app-shell">
-    {screen !== 'viewer' && <Header screen={screen} online={online} onHome={home} onSync={() => setScreen('sync')}/>} 
+    {screen !== 'viewer' && <Header screen={screen} online={online} refreshing={refreshing} onHome={home} onSync={() => setScreen('sync')} onRefresh={refreshApp}/>} 
     {screen === 'library' && <Library books={books} busy={busy} progress={progress} onImport={importFiles} onOpen={open} onEdit={edit} onDelete={remove}/>} 
     {screen === 'editor' && <Editor initialBook={activeBook} initialPages={drafts} onCancel={home} onSaved={home} onAddFiles={importFiles}/>} 
     {screen === 'viewer' && activeBook && <Viewer book={activeBook} pages={activePages} onBack={home} onEdit={() => edit(activeBook)}/>} 
