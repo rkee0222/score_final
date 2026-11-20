@@ -39,12 +39,22 @@ async function api<T>(config: SyncConfig, path: string, init: RequestInit = {}, 
     ...(init.headers as Record<string, string> | undefined),
   };
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(endpoint(config, path), {
-      ...init,
-      mode: 'cors',
-      cache: 'no-store',
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(endpoint(config, path), {
+        ...init,
+        mode: 'cors',
+        cache: 'no-store',
+        headers,
+      });
+    } catch (networkError) {
+      // fetch() itself threw: the request never completed (network blocked,
+      // CORS rejection, offline, content blocker, etc). Surface the real reason
+      // instead of a generic message so the user can see what is blocking it.
+      const reason = networkError instanceof Error ? networkError.message : String(networkError);
+      if (attempt < maxAttempts) { await wait(attempt * 1200); continue; }
+      throw new Error(`네트워크 요청 실패(fetch): ${reason} · 경로 ${path || '저장소'}. 콘텐츠 차단기·추적 방지·VPN을 끄고 다시 시도하세요.`);
+    }
     if (allow404 && response.status === 404) return null;
     if (response.ok) {
       if (response.status === 204) return null;
@@ -52,10 +62,10 @@ async function api<T>(config: SyncConfig, path: string, init: RequestInit = {}, 
     }
     try { lastDetail = (await response.json()).message ?? ''; } catch { lastDetail = response.statusText; }
     if (response.status === 401 && attempt < maxAttempts) { await wait(attempt * 1500); continue; }
-    if (response.status === 401) throw new Error('토큰 인증에 실패했습니다. 방금 만든 토큰이라면 1~2분 뒤 다시 시도해 주세요. 계속 실패하면 토큰 상태(Active)와 score_final_data의 Contents 읽기/쓰기 권한을 확인하세요.');
-    if (response.status === 403) throw new Error('토큰에 저장소 읽기/쓰기 권한이 없습니다. score_final_data의 Contents를 Read and write로 설정했는지 확인하세요.');
-    if (response.status === 404) throw new Error('비공개 데이터 저장소를 찾을 수 없습니다. 토큰의 저장소 접근 범위(score_final_data)를 확인하세요.');
-    throw new Error(`GitHub 동기화 오류 (${response.status}): ${lastDetail}`);
+    if (response.status === 401) throw new Error(`토큰 인증 실패(401): ${lastDetail || 'Bad credentials'}. 토큰 상태(Active)와 score_final_data의 Contents 읽기/쓰기 권한을 확인하세요.`);
+    if (response.status === 403) throw new Error(`접근 거부(403): ${lastDetail}. score_final_data의 Contents를 Read and write로 설정했는지 확인하세요.`);
+    if (response.status === 404) throw new Error(`저장소를 찾을 수 없음(404): ${lastDetail}. 토큰의 저장소 접근 범위(score_final_data)를 확인하세요.`);
+    throw new Error(`GitHub 오류 ${response.status}: ${lastDetail}`);
   }
   throw new Error('GitHub 요청에 반복 실패했습니다. 잠시 후 다시 시도해 주세요.');
 }
