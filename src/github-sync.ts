@@ -27,16 +27,23 @@ async function api<T>(config: SyncConfig, path: string, init: RequestInit = {}, 
   // giving up, as GitHub recommends for transient auth failures.
   const maxAttempts = 4;
   let lastDetail = '';
+  const hasBody = init.body != null;
+  // Only send Content-Type on requests that actually carry a JSON body. On a
+  // bodyless GET it forces a CORS preflight that iOS Safari handles strictly,
+  // which made token requests fail on iPad while desktop browsers tolerated it.
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `token ${config.token}`,
+    'X-GitHub-Api-Version': API_VERSION,
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(init.headers as Record<string, string> | undefined),
+  };
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fetch(endpoint(config, path), {
       ...init,
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${config.token}`,
-        'X-GitHub-Api-Version': API_VERSION,
-        'Content-Type': 'application/json',
-        ...init.headers,
-      },
+      mode: 'cors',
+      cache: 'no-store',
+      headers,
     });
     if (allow404 && response.status === 404) return null;
     if (response.ok) {
