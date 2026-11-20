@@ -20,9 +20,15 @@ self.addEventListener('install', (event) => {
 self.addEventListener('message', (event) => { if (event.data === 'skip') self.skipWaiting(); });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
-    .then(() => self.clients.claim()));
+  event.waitUntil((async () => {
+    // Drop every previously cached version so a stale app can never survive an update.
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)));
+    await self.clients.claim();
+    // Force every open tab/PWA window onto the freshly activated app.
+    const clients = await self.clients.matchAll({ type: 'window' });
+    clients.forEach((client) => client.navigate(client.url));
+  })());
 });
 
 self.addEventListener('fetch', (event) => {
