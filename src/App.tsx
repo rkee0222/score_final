@@ -41,17 +41,18 @@ async function forceRefreshApp() {
       await Promise.all(keys.map((key) => caches.delete(key)));
     }
   } catch { /* best effort; reload anyway */ }
-  // Cache-busting query so the HTML itself is refetched from the network.
-  const target = `${location.pathname}?u=${Date.now()}`;
-  location.replace(target);
+  // Cache-busting query so the HTML itself is refetched from the network, with a
+  // tiny delay to let the service worker fully unregister first on iOS.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  location.href = `${location.origin}${location.pathname}?u=${Date.now()}`;
 }
 
 function Header({ screen, online, refreshing, onHome, onSync, onRefresh }: { screen: Screen; online: boolean; refreshing: boolean; onHome: () => void; onSync: () => void; onRefresh: () => void }) {
   return <header className="app-header">
-    <button className="brand" onClick={onHome}><span>♪</span><strong>ScoreView</strong><small>manual score reader</small></button>
+    <button className="brand" onClick={onHome}><span>♪</span><strong>ScoreView</strong><small>v{__BUILD_ID__}</small></button>
     <div className="badges"><span className="badge saved">● 기기 내 저장</span><span className={`badge ${online ? 'online' : 'offline'}`}>{online ? '동기화 가능' : '오프라인'}</span></div>
     <nav>
-      <button className="refresh-button" aria-label="앱 새로고침" title="앱 새로고침" disabled={refreshing} onClick={onRefresh}>{refreshing ? '⟳' : '↻'} 새로고침</button>
+      <button className="refresh-button" aria-label="앱 새로고침" title="앱 새로고침" disabled={refreshing} onClick={onRefresh}>{refreshing ? '⟳' : '↻'} 업데이트</button>
       <button className={screen === 'library' ? 'active' : ''} onClick={onHome}>보관함</button>
       <button className={screen === 'sync' ? 'active' : ''} onClick={onSync}>동기화</button>
     </nav>
