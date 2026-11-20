@@ -100,7 +100,7 @@ export function SyncPanel({ controller, onBack }: { controller: SyncController; 
   return <main className="sync-page">
     <button className="back-link" onClick={onBack}>← 보관함</button>
     <div className="sync-card">
-      <span className="section-label">PRIVATE GITHUB SYNC</span><h1>기기 간 동기화</h1>
+      <span className="section-label">PRIVATE GITHUB SYNC · v{__BUILD_ID__}</span><h1>기기 간 동기화</h1>
       <p className="sync-lead">악보는 공개 앱 저장소가 아닌 본인의 비공개 저장소에 저장됩니다. 각 기기에서 최초 한 번만 연결하세요.</p>
       <div className={`sync-state ${controller.status.phase}`}><span>{busy ? '↻' : controller.status.phase === 'success' ? '✓' : controller.status.phase === 'error' ? '!' : '●'}</span><div><strong>{controller.status.message}</strong><small>마지막 동기화: {formatSyncTime(controller.status.lastSyncAt)}</small></div></div>
       <div className="sync-form">
